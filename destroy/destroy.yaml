@@ -1,0 +1,118 @@
+
+trigger:
+- none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - name: DEV_ENVIRONMENT
+    value: dev
+  - name: QA_ENVIRONMENT
+    value: qa
+
+# Stage-1: Terraform Validate Stage
+## Step-1: Publish Artifacts to Pipeline (Pipeline artifacts provide a way to share files between stages in a pipeline or between different pipelines. )
+## Step-2: Install Latest Terraform (0.13.5) (Ideally not needed if we use default Ubuntu Agents)
+## Step-3: Validate Terraform Manifests (terraform init, terraform validate)
+
+stages:
+- stage: Terraforminstall
+  jobs:
+    - job: TerraformInstall
+      continueOnError: true
+      steps:       
+        - task: PublishPipelineArtifact@1
+          displayName: Publish artifacts
+          inputs:
+            targetPath: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+            artifact: 'terraform-manifests-out'
+            publishLocation: 'pipeline'
+        - task: TerraformInstaller@2
+          displayName: Terraform Install
+          inputs:
+            terraformVersion: 'latest'
+            
+
+- stage: AKSClusterDestroy
+  jobs:
+    - job: AKSDevClusterDestroy
+      steps:
+        - task: DownloadSecureFile@1
+          displayName: Download SSH key
+          name: ssh_key
+          inputs:
+            secureFile: 'aksprodsshkey.pub'
+        - task: TerraformInstaller@2
+          displayName: Terraform Install
+          inputs:
+            terraformVersion: 'latest'
+        - task: TerraformCLI@2
+          displayName: Terraform Init
+          inputs:
+            command: 'init'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+            backendType: 'azurerm'
+            backendServiceArm: 'terraform-aks-azurerm-svc-con'
+            backendAzureRmResourceGroupName: 'terraform-storage-rg'
+            backendAzureRmStorageAccountName: 'tfaksbckendmaltlk'
+            backendAzureRmContainerName: 'tfstatefiles'
+            backendAzureRmKey: 'aks-$(DEV_ENVIRONMENT).tfstate'
+            allowTelemetryCollection: false
+        - task: TerraformCLI@2
+          displayName: Terraform Plan
+          inputs:
+            command: 'plan'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+            environmentServiceName: 'terraform-aks-azurerm-svc-con'
+            runAzLogin: true
+            commandOptions: '-var ssh_public_key=$(ssh_key.secureFilePath) -var environment=$(DEV_ENVIRONMENT) -out $(System.DefaultWorkingDirectory)/terraform_manifests/$(DEV_ENVIRONMENT)-$(Build.BuildId).out'
+            allowTelemetryCollection: false
+        - task: TerraformCLI@2
+          displayName: Terraform dstroy
+          inputs:
+            command: 'destroy'
+            workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+            environmentServiceName: 'terraform-aks-azurerm-svc-con'
+            commandOptions: '-var ssh_public_key=$(ssh_key.secureFilePath) -var environment=$(DEV_ENVIRONMENT)'
+            allowTelemetryCollection: false
+
+# Destroy QA cluster    
+- stage: AKSQAClusterDestroy
+  jobs:
+    - job: AKSQAClusterDestroy
+      steps:
+            - task: DownloadSecureFile@1
+              displayName: Download SSH File
+              name: ssh_key
+              inputs:
+                secureFile: 'aksprodsshkey.pub'
+            - task: TerraformCLI@2
+              displayName: Terraform init
+              inputs:
+                command: 'init'
+                workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+                backendType: 'azurerm'
+                backendServiceArm: 'terraform-aks-azurerm-svc-con'
+                backendAzureRmResourceGroupName: 'terraform-storage-rg'
+                backendAzureRmStorageAccountName: 'tfaksbckendmaltlk'
+                backendAzureRmContainerName: 'tfstatefiles'
+                backendAzureRmKey: 'aks-$(QA_ENVIRONMENT).tfstate'
+                allowTelemetryCollection: false
+            - task: TerraformCLI@2
+              displayName: Terraform plan
+              inputs:
+                command: 'plan'
+                workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+                environmentServiceName: 'terraform-aks-azurerm-svc-con'
+                commandOptions: '-var ssh_public_key=$(ssh_key.secureFilePath) -var environment=$(QA_ENVIRONMENT) -out  $(System.DefaultWorkingDirectory)/terraform_manifests/$(QA_ENVIRONMENT)-$(Build.BuildId).out'
+                allowTelemetryCollection: false
+            - task: TerraformCLI@2
+              displayName: Terraform destroy
+              inputs:
+                command: 'destroy'
+                workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_manifests'
+                environmentServiceName: 'terraform-aks-azurerm-svc-con'
+                commandOptions: '-var ssh_public_key=$(ssh_key.secureFilePath) -var environment=$(DEV_ENVIRONMENT)'
+                runAzLogin: true
+                allowTelemetryCollection: false
