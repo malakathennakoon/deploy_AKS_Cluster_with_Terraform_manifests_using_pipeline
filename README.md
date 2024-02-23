@@ -1,6 +1,6 @@
 # deploy_AKS_Cluster_with_Terraform_manifests_using_pipeline
 
-## Imortant notes
+## Important notes
 
 - These manifests are used to deploy an AKS cluster using AZ Devops pipelines
 - Backend is set to use an Azure storage account
